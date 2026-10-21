@@ -1,7 +1,8 @@
 # 本机配置和私人数据，不提交
 .env
 config/plans.yaml
-/data/                 # 只忽略根目录的 data/（快照、日志）；site/ 里的 data/ 要提交
+# 只忽略根目录的 data/（快照、日志、截图用的浏览器配置）；site/ 里的 data/ 是日报网页的数据，要提交
+/data/
 
 # Python
 .venv/
