@@ -1,0 +1,728 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>今日环境灯 · trade-copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+<div class="bubbles" aria-hidden="true" id="bubbles"></div>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">TRADE-COPILOT</div>
+      <div class="sub">
+        <nav class="nav"><a href="/" class="tag fun on">今日环境灯</a><a href="/alts" class="tag fun">强势山寨</a></nav>
+        <button id="refresh" class="btn fun" type="button">刷新数据</button>
+        <span id="updated" class="updated num"></span>
+      </div>
+    </div>
+    <div class="head-right">
+      <div class="mascot" id="mascot"></div>
+      <div class="panel qr">
+        <img src="static/qq-group-qrcode.png" alt="听星观宇 QQ 群二维码">
+        <div class="qn fun">听星观宇</div>
+        <div class="qc">扫码加入 QQ 群</div>
+      </div>
+    </div>
+  </header>
+
+  <main id="app"><div class="panel state fun">海星正在潜水捞数据…</div></main>
+
+  <footer><span>只整理信息，不构成投资建议；怎么做由自己判断，系统不会下单。 · <a href="history/">历史日报</a></span></footer>
+</div>
+
+<script>window.STATIC_SITE = true;</script>
+<script src="static/common.js"></script>
+<script>
+// ?report=1：给 python -m copilot.report 截长图用，去掉按钮和动画；?qr=QQ号&qn=名字 换右上角二维码
+const PARAMS = new URLSearchParams(location.search);
+const REPORT = PARAMS.has('report');
+if (REPORT) document.body.classList.add('report');
+// 发布到 GitHub Pages 的静态网页：数据是导出时存下的 data/*.json，没有刷新和强势山寨页
+const STATIC_SITE = !!window.STATIC_SITE;
+if (STATIC_SITE) document.body.classList.add('static-site');
+const api = (name, refresh) => (STATIC_SITE ? `data/${name}.json` : `/api/${name}${refresh ? '?refresh=true' : ''}`);
+if (PARAMS.get('qr')) {
+  $('.qr img').src = `/qr/${encodeURIComponent(PARAMS.get('qr'))}`;
+  $('.qr .qn').textContent = PARAMS.get('qn') || '';
+}
+const LIGHT_ORDER = ['red', 'yellow', 'green'];
+const CHIP = { 1: '✅ 利好', 0: '➖ 中性', '-1': '⚠️ 利空', null: '❔ 缺失' };
+// 跟 BTC 直接相关的五项放在环境灯卡片的表格里，其余宏观指标放下面
+const HERO_INDS = ['BTC 趋势', 'BTC 波动', '杠杆情绪', '恐惧贪婪', 'BTC 现货 ETF 资金流'];
+const RULES = [
+  { light: 'red', icon: '🔴', name: '红灯', cond: 'BTC 空头排列（一票否决），或综合分 ≤ −2' },
+  { light: 'yellow', icon: '🟡', name: '黄灯', cond: '其他情况' },
+  { light: 'green', icon: '🟢', name: '绿灯', cond: 'BTC 多头排列，且综合分 ≥ 3' },
+];
+const SERIES = [
+  { key: 'closes', name: 'BTC 收盘', color: 'var(--series-1)' },
+  { key: 'ma20', name: 'MA20', color: 'var(--series-2)' },
+  { key: 'ma50', name: 'MA50', color: 'var(--series-3)' },
+];
+
+
+
+// 恐惧贪婪半圆仪表：分段按 alternative.me 的标准，黑点指当前值
+const FNG_BANDS = [[0, 25, '#d03b3b'], [25, 45, '#eb8a34'], [45, 56, '#f2c230'], [56, 76, '#9ccc3c'], [76, 101, '#3fb37f']];
+function fngGauge(v, label) {
+  const cx = 60, cy = 56, r = 44;
+  const ang = (x) => Math.PI * (1 - Math.min(x, 100) / 100);          // 0 在左边，100 在右边
+  const pt = (x) => `${(cx + r * Math.cos(ang(x))).toFixed(1)},${(cy - r * Math.sin(ang(x))).toFixed(1)}`;
+  const arcs = FNG_BANDS.map(([a, b, c]) =>
+    `<path d="M${pt(a + 1.5)} A${r} ${r} 0 0 1 ${pt(Math.min(b, 100) - 1.5)}" stroke="${c}" stroke-width="8" stroke-linecap="round" fill="none"/>`).join('');
+  const color = FNG_BANDS.find(([a, b]) => v >= a && v < b)[2];
+  const [dx, dy] = pt(v).split(',');
+  const w = label.length * 13 + 16;
+  return `<svg class="fng" viewBox="0 0 120 80" role="img" aria-label="恐惧贪婪指数 ${v}，${esc(label)}">${arcs}
+    <circle cx="${dx}" cy="${dy}" r="6.5" fill="#1a1a1a" stroke="var(--paper)" stroke-width="2.5"/>
+    <text x="${cx}" y="${cy - 2}" text-anchor="middle" class="fng-num">${v}</text>
+    <rect x="${cx - w / 2}" y="${cy + 6}" width="${w}" height="18" rx="9" fill="${color}" stroke="#1a1a1a" stroke-width="2"/>
+    <text x="${cx}" y="${cy + 19}" text-anchor="middle" class="fng-label">${esc(label)}</text></svg>`;
+}
+
+// ---- 杠杆情绪：表格里的小卡片 + 宏观区的详情面板（数据都来自币安合约公开接口） ----
+const FUNDING_HOT = 0.0003;   // 和 regime.py 的过热线一致
+const LEV_PANEL = { ind: '杠杆情绪', news: /爆仓|清算|杠杆|资金费率|持仓量|多空/ };
+const fundPct = (v, n) => `${(v * 100).toFixed(n)}%`;
+const avgLast = (vals, n) => vals.slice(-n).reduce((a, b) => a + b, 0) / Math.min(n, vals.length);
+const chgPct = (vals, n) => (vals.length > n ? (vals.at(-1) / vals.at(-1 - n) - 1) * 100 : null);
+
+function levCell(mc) {
+  const f = mc.funding.values, oi7 = mc.oi ? chgPct(mc.oi.values, 7) : null;
+  return `<a class="etf-link jump" href="#macro-lev" title="查看杠杆详情">
+    <span class="coin lev" aria-hidden="true">⚖</span><b class="etf-v">费率 ${fundPct(f.at(-1), 4)}</b>
+    <small>7 天均 ${fundPct(avgLast(f, 21), 4)}${oi7 == null ? '' : ` · 持仓 7 天 ${pctStr(oi7)}`} · 详情 →</small></a>`;
+}
+
+function levPanel(d) {
+  const ind = d.indicators.find((i) => i.name === LEV_PANEL.ind);
+  const s = ind?.score == null ? 'missing' : `s${ind.score}`;
+  const mc = d.macro || {};
+  const head = `<div class="macro-head"><h3 class="fun">杠杆情绪</h3><span class="asof">费率截至 ${esc(d.asof?.funding || '—')}</span><span class="chip ${s}">${CHIP[ind?.score ?? null]}</span>
+    <span class="macro-concl">${esc(ind ? split(ind.text).concl : '数据缺失')}</span></div>`;
+  if (!mc.funding) return `<div class="panel macro" id="macro-lev">${head}<div class="empty">数据缺失</div></div>`;
+  const f = mc.funding.values, avg7 = avgLast(f, 21);
+  const stats = [`<div class="stat"><small>资金费率（${mc.funding.dates.at(-1).slice(5)} 北京时间）</small><b class="num">${fundPct(f.at(-1), 4)}</b>
+      <span class="chg num">7 天平均 ${fundPct(avg7, 4)}</span><span class="chg num">折合年化约 ${(avg7 * 3 * 365 * 100).toFixed(1)}%</span></div>`];
+  if (mc.oi) {
+    const o = mc.oi.values, usd = mc.oi_usd?.values.at(-1);
+    stats.push(`<div class="stat"><small>持仓量</small><b class="num">${fmt(o.at(-1))} BTC</b>
+      ${usd ? `<span class="chg num">约 ${money(usd / 1e6).slice(1)}</span>` : ''}
+      <span class="chg num">7 天 ${pctStr(chgPct(o, 7))}</span>${o.length > 29 ? `<span class="chg num">30 天 ${pctStr(chgPct(o, o.length - 1))}</span>` : ''}</div>`);
+  }
+  if (mc.ls_ratio) {
+    const long = mc.ls_long.values.at(-1);
+    stats.push(`<div class="stat"><small>多空账户比</small><b class="num">${mc.ls_ratio.values.at(-1).toFixed(2)}</b>
+      <span class="chg num">做多 ${(long * 100).toFixed(0)}% · 做空 ${((1 - long) * 100).toFixed(0)}%</span></div>`);
+  }
+  return `<div class="panel macro" id="macro-lev">${head}
+    <div class="lev-stats">${stats.join('')}</div>
+    <div class="macro-charts two">
+      <div class="mseries"><div class="stat"><small>资金费率 · 近 30 天（每 8 小时一根，北京时间）</small></div><div class="chart mchart" id="mc-funding"></div></div>
+      <div class="mseries"><div class="stat"><small>持仓量 vs BTC 价格 · 第一天 = 100</small></div><div class="chart mchart" id="mc-oi"></div></div>
+    </div>
+    <div class="macro-more">
+      <details class="drop"><summary class="fun">为什么看它</summary><div class="drop-body why">
+        资金费率为正，说明做多的人多、多头付钱给空头；费率越高，多头越拥挤，一旦下跌容易连环爆仓。
+        持仓量代表合约里押了多少钱：持仓猛增而价格没跟上，说明杠杆在堆积。多空账户比是做多和做空的账户数之比，散户情绪的参考。
+        打分：7 天平均费率超过 0.03% 计 −1；持仓量 7 天涨超 15% 而 BTC 涨不到 3% 也计 −1；其余 0。数据来自币安合约公开接口。</div></details>
+      <details class="drop"><summary class="fun">相关快讯 <span class="cnt" id="mc-cnt-${LEV_PANEL.ind}"></span></summary>
+        <ul class="drop-body feed" id="mn-${LEV_PANEL.ind}"><li class="empty">海星正在翻报纸…</li></ul></details>
+    </div>
+  </div>`;
+}
+
+// ---- BTC 现货 ETF 资金流：表格里的小卡片 + 宏观区的详情面板 ----
+const ETF_DAYS = 30;
+const ETF_PANEL = { ind: 'BTC 现货 ETF 资金流', news: /ETF|IBIT|贝莱德/ };
+// 百万美元 → "+$23.2M" / "−$1.08B"
+const money = (m) => `${m >= 0 ? '+' : '−'}$${Math.abs(m) >= 1000 ? `${(Math.abs(m) / 1000).toFixed(2)}B` : `${Math.abs(m).toFixed(1)}M`}`;
+const sumLast = (vals, n) => vals.slice(-n).reduce((a, b) => a + b, 0);
+
+function etfCell(e) {
+  const v = e.values.at(-1);
+  return `<a class="etf-link jump" href="#macro-etf" title="查看 BTC 现货 ETF 资金流详情">
+    <span class="coin" aria-hidden="true">₿</span><b class="etf-v ${v >= 0 ? 'in' : 'out'}">${money(v)}</b>
+    <small>${e.dates.at(-1).slice(5)} 当天 · 近 5 日 ${money(sumLast(e.values, 5))} · 详情 →</small></a>`;
+}
+
+function etfPanel(d) {
+  const ind = d.indicators.find((i) => i.name === ETF_PANEL.ind);
+  const s = ind?.score == null ? 'missing' : `s${ind.score}`;
+  const e = d.macro?.etf;
+  const head = `<div class="macro-head"><h3 class="fun">BTC 现货 ETF 资金流</h3><span class="asof">截至 ${esc(d.asof?.etf || '—')}</span><span class="chip ${s}">${CHIP[ind?.score ?? null]}</span>
+    <span class="macro-concl">${esc(ind ? split(ind.text).concl : '数据缺失')}</span></div>`;
+  if (!e) return `<div class="panel macro" id="macro-etf">${head}<div class="empty">数据缺失</div></div>`;
+  const v = e.values.at(-1), last20 = e.values.slice(-20);
+  // 只列当天有进出的基金，按金额大小排；没动的合并成一行
+  const all = Object.entries(d.etf_funds || {});
+  const funds = all.filter(([, x]) => x !== 0).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const idle = all.length - funds.length;
+  const fundRows = funds.map(([name, x]) => `<tr><td>${esc(name)}</td><td class="${x > 0 ? 'in' : 'out'}">${money(x)}</td></tr>`).join('')
+    + (idle ? `<tr><td colspan="2" class="idle">其余 ${idle} 只当天无进出</td></tr>` : '');
+  return `<div class="panel macro" id="macro-etf">${head}
+    <div class="stat"><small>${e.dates.at(-1)} 当天净流入</small><b class="num ${v >= 0 ? 'in' : 'out'}">${money(v)}</b>
+      <span class="chg num">近 5 日 ${money(sumLast(e.values, 5))}</span><span class="chg num">近 20 日 ${money(sumLast(e.values, 20))}</span>
+      <span class="chg num">20 天里 ${last20.filter((x) => x > 0).length} 天流入</span></div>
+    <div class="chart mchart" id="mc-etf"></div>
+    <div class="macro-more">
+      <details class="drop"><summary class="fun">当天各基金 <span class="cnt">${funds.length}</span></summary>
+        <div class="drop-body"><table class="funds num"><thead><tr><th>基金</th><th>净流入</th></tr></thead><tbody>${fundRows}</tbody></table></div></details>
+      <details class="drop"><summary class="fun">为什么看它</summary><div class="drop-body why">
+        美国现货 BTC ETF 的申购赎回代表传统资金的进出：持续净流入说明机构在买，持续净流出说明在撤。数据来自 tftc.io，美股收盘后更新。
+        打分：近 5 个交易日累计净流入超过 +5 亿美元计 +1，净流出超过 5 亿美元计 −1，其余 0。</div></details>
+      <details class="drop"><summary class="fun">相关快讯 <span class="cnt" id="mc-cnt-${ETF_PANEL.ind}"></span></summary>
+        <ul class="drop-body feed" id="mn-${ETF_PANEL.ind}"><li class="empty">海星正在翻报纸…</li></ul></details>
+    </div>
+  </div>`;
+}
+
+// 柱状图：正数向上、负数向下，零线加粗；悬停整列显示提示框
+// opts: height, yFmt 轴刻度, vFmt 提示框数值, name 提示框里的名字, pos/neg 正负柱颜色, refs [{v, label}] 参考虚线
+function barChart(box, dates, values, opts) {
+  box.querySelector('svg')?.remove();
+  let tip = box.querySelector('.tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'tip'; box.appendChild(tip); }
+  const W = box.clientWidth, H = opts.height, n = values.length;
+  const m = { t: 10, r: 12, b: 26, l: 56 };
+  const refVals = (opts.refs || []).map((r) => r.v);
+  const vmin = Math.min(0, ...values, ...refVals), vmax = Math.max(0, ...values, ...refVals);
+  const step = niceStep((vmax - vmin) / 4 || 1);
+  const lo = Math.floor(vmin / step) * step, hi = Math.ceil(vmax / step) * step;
+  const bw = (W - m.l - m.r) / n, w = Math.max(2, bw * 0.68);
+  const y = (v) => m.t + ((hi - v) * (H - m.t - m.b)) / (hi - lo);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let v = lo; v <= hi + step / 1e6; v += step) {
+    svg += `<line class="grid-line" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>`;
+    svg += `<text class="axis-text num" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${opts.yFmt(v)}</text>`;
+  }
+  const every = Math.ceil(n / (W < 500 ? 3 : W < 800 ? 5 : 7));
+  for (let i = n - 1; i >= 0; i -= every) {
+    svg += `<text class="axis-text num" x="${m.l + (i + 0.5) * bw}" y="${H - 6}" text-anchor="middle">${dates[i].slice(5)}</text>`;
+  }
+  values.forEach((v, i) => {
+    const top = Math.min(y(v), y(0)), h = Math.max(1, Math.abs(y(v) - y(0)));
+    svg += `<rect class="bar" data-i="${i}" x="${(m.l + i * bw + (bw - w) / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"
+      rx="${Math.min(2, w / 3)}" fill="${v >= 0 ? opts.pos : opts.neg}"/>`;
+  });
+  svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}" stroke="var(--text-2)" stroke-width="1.5"/>`;
+  for (const r of opts.refs || []) {
+    svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(r.v)}" y2="${y(r.v)}" stroke="var(--critical)" stroke-width="1.5" stroke-dasharray="5 4"/>`
+      + `<text class="axis-text" x="${W - m.r - 4}" y="${y(r.v) - 4}" text-anchor="end">${r.label}</text>`;
+  }
+  values.forEach((_, i) => { svg += `<rect class="hitbar" data-i="${i}" x="${m.l + i * bw}" y="0" width="${bw}" height="${H - m.b}" fill="transparent"/>`; });
+  svg += '</svg>';
+  box.insertAdjacentHTML('afterbegin', svg);
+  box.querySelectorAll('.hitbar').forEach((r) => {
+    r.addEventListener('pointerenter', () => {
+      const i = +r.dataset.i;
+      box.querySelectorAll('.bar').forEach((b) => b.classList.toggle('dim', +b.dataset.i !== i));
+      tip.innerHTML = `<div class="d num">${dates[i]}</div><div class="r"><span>${opts.name}</span><b class="num">${opts.vFmt(values[i])}</b></div>`;
+      tip.style.display = 'block';
+      const cx = m.l + (i + 0.5) * bw;
+      tip.style.left = `${cx + 14 + tip.offsetWidth > W ? cx - 14 - tip.offsetWidth : cx + 14}px`;
+      tip.style.top = `${m.t}px`;
+    });
+  });
+  box.querySelector('svg').addEventListener('pointerleave', () => {
+    tip.style.display = 'none';
+    box.querySelectorAll('.bar').forEach((b) => b.classList.remove('dim'));
+  });
+}
+
+// ---- 今日变化 + 近 30 天灯色 ----
+// 表格里每一项对应的数据时间
+const ASOF_KEY = { 'BTC 趋势': 'btc', 'BTC 波动': 'btc', '杠杆情绪': 'funding', '恐惧贪婪': 'fng', 'BTC 现货 ETF 资金流': 'etf' };
+const LIGHT_NAME = { red: '红灯', yellow: '黄灯', green: '绿灯' };
+
+function changesPanel(d) {
+  const arrow = { up: '▲', down: '▼', flat: '●' };
+  const items = (d.changes || []).map((c) => `<li class="${c.tone}"><span class="arw">${arrow[c.tone]}</span>${esc(c.text)}</li>`).join('')
+    || '<li class="flat"><span class="arw">●</span>和昨天相比没有明显变化</li>';
+  const note = d.first_day ? '<p class="chg-note">今天开始保存每日快照，明天起还会显示灯色、综合分和各项打分的变化。</p>' : '';
+  return `<section class="panel changes" aria-label="今日变化"><h3 class="fun">今日变化 <small>对比昨天</small></h3><ul>${items}</ul>${note}</section>`;
+}
+
+function historyStrip(h) {
+  if (!h.length) return '';
+  const dots = h.map((x) => `<span class="hd ${x.light}" title="${x.date} ${LIGHT_NAME[x.light]} · 综合 ${x.score > 0 ? '+' : ''}${x.score}"></span>`).join('');
+  return `<div class="hist"><small>近 30 天灯色</small>${dots}${h.length < 30 ? `<small>已记录 ${h.length} 天</small>` : ''}</div>`;
+}
+
+// ---- Coinbase 溢价：美国买盘相对全球的强弱，不计入综合分 ----
+const PREM_PANEL = { ind: 'Coinbase 溢价', news: /Coinbase|溢价/ };
+const signPct = (v, n) => `${v > 0 ? '+' : ''}${v.toFixed(n)}%`;
+
+function premiumPanel(d) {
+  const p = d.macro?.premium;
+  const head = `<div class="macro-head"><h3 class="fun">Coinbase 溢价</h3><span class="chip">不计分</span>
+    <span class="asof">截至 ${esc(d.asof?.premium || '—')}</span></div>`;
+  if (!p) return `<div class="panel macro" id="macro-premium">${head}<div class="empty">数据缺失</div></div>`;
+  const v = p.values.at(-1), last24 = p.values.slice(-24);
+  return `<div class="panel macro" id="macro-premium">${head}
+    <div class="stat"><small>最新一小时</small><b class="num ${v >= 0 ? 'in' : 'out'}">${signPct(v, 3)}</b>
+      <span class="chg num">24 小时平均 ${signPct(avgLast(p.values, 24), 3)}</span><span class="chg num">7 天平均 ${signPct(avgLast(p.values, 168), 3)}</span>
+      <span class="chg num">24 小时里 ${last24.filter((x) => x > 0).length} 小时为正</span></div>
+    <div class="chart mchart" id="mc-premium"></div>
+    <div class="macro-more">
+      <details class="drop"><summary class="fun">为什么看它</summary><div class="drop-body why">
+        Coinbase 是美国机构和散户买 BTC 的主要入口。用 Coinbase 的 BTC-USD 对比币安的 BTC-USDT：溢价为正说明美国买盘比全球其他地方更积极，为负说明美国在卖。
+        USDT 偶尔偏离 1 美元，会带来 ±0.05% 左右的误差，所以小幅正负意义不大，持续偏离才值得注意。不计入综合分。</div></details>
+      <details class="drop"><summary class="fun">相关快讯 <span class="cnt" id="mc-cnt-${PREM_PANEL.ind}"></span></summary>
+        <ul class="drop-body feed" id="mn-${PREM_PANEL.ind}"><li class="empty">海星正在翻报纸…</li></ul></details>
+    </div>
+  </div>`;
+}
+
+// ---- 关键价位：最上面一条，压力在上、支撑在下，都从近到远 ----
+function levelsPanel(lv, asof) {
+  if (!lv) return '<section class="panel lv-panel"><div class="empty">关键价位暂时拿不到</div></section>';
+  const chip = (x) => {
+    const dist = (x.price / lv.price - 1) * 100;
+    return `<span class="lv-chip"><b class="num">${fmt(x.price)}</b><small>${esc(x.label)} · <span class="num">${pctStr(dist)}</span></small></span>`;
+  };
+  return `<section class="panel lv-panel" aria-label="BTC 关键价位">
+    <div class="lv-head"><h3 class="fun">BTC 关键价位</h3><span class="lv-price">现价 <b class="num">${fmt(lv.price)}</b></span>
+      <small>${esc(asof || '')} · 仅作参考 · “今日”指北京时间 8:00 起</small></div>
+    <div class="lv-row res"><span class="lv-k fun">压力</span><div class="lv-chips">${lv.resistance.map(chip).join('')}</div></div>
+    <div class="lv-row sup"><span class="lv-k fun">支撑</span><div class="lv-chips">${lv.support.map(chip).join('')}</div></div>
+  </section>`;
+}
+
+// ---- 未来 7 天：按北京时间分天列出，已经过去的变淡 ----
+const BJ = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+function bjTime(iso) {
+  const p = Object.fromEntries(BJ.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return { day: `${p.month}/${p.day} ${p.weekday}`, time: `${p.hour}:${p.minute}` };
+}
+
+const fcOf = (f, p) => [f && `预期 ${esc(f)}`, p && `前值 ${esc(p)}`].filter(Boolean).join(' · ');
+
+function agendaPanel(events) {
+  if (!events.length) return '<section class="panel agenda"><div class="empty">未来 7 天没有查到美国的中高影响数据</div></section>';
+  let lastDay = '';
+  const rows = events.map((e) => {
+    const t = bjTime(e.time), past = new Date(e.time) < new Date();
+    const day = t.day === lastDay ? '' : t.day;
+    lastDay = t.day;
+    // 合并的发布（如标普制造业 + 服务业 PMI）逐项列出；项名去掉和标题重复的词，"标普制造业 PMI 初值" → "制造业"
+    const short = (name) => e.title.split(' ').reduce((n, w) => n.replace(w, ''), name).trim() || name;
+    const fc = e.items?.length
+      ? e.items.map((i) => `<div>${esc(short(i.title))}：${fcOf(i.forecast, i.previous)}</div>`).join('')
+      : e.note ? esc(e.note) : fcOf(e.forecast, e.previous);
+    return `<li class="${past ? 'past' : ''} ${e.impact}">
+      <span class="ag-day fun">${day}</span><span class="ag-time num">${t.time}</span>
+      <span class="ag-title">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener" title="打开官方发布页：${esc(new URL(e.url).hostname)}">${esc(e.title)}<span class="ext" aria-hidden="true">↗</span></a>` : esc(e.title)} <span class="imp ${e.impact}">${e.impact === 'high' ? '高影响' : '中影响'}</span>${past ? ' <span class="imp">已过</span>' : ''}</span>
+      <span class="ag-fc num">${fc}</span>
+    </li>`;
+  }).join('');
+  return `<section class="panel agenda"><ul>${rows}</ul></section>`;
+}
+
+// "数据：结论" → 结论做标题，数据放下面
+function split(text) {
+  const i = text.lastIndexOf('：');
+  return i < 0 ? { concl: text, data: '' } : { concl: text.slice(i + 1), data: text.slice(0, i) };
+}
+
+function render(d) {
+  $('#updated').textContent = REPORT ? `BTC 每日面板 · ${d.updated_at}` : `更新于 ${d.updated_at}`;
+  const sign = d.score > 0 ? '+' : '';
+  const lamps = LIGHT_ORDER.map((c) => `<div class="lamp ${c} ${c === d.light ? 'on' : ''}"></div>`).join('');
+  const row = (i) => {
+    const { concl, data } = split(i.text);
+    const s = i.score == null ? 'missing' : `s${i.score}`;
+    return `<tr class="${s}">
+      <th scope="row" class="fun">${esc(i.name)}${i.weight > 1 ? ` <span class="weight" title="权重 ×${i.weight}">×${i.weight}</span>` : ''}
+        <small class="asof">${esc(d.asof?.[ASOF_KEY[i.name]] || '')}</small></th>
+      <td class="concl">${esc(concl)}</td>
+      <td class="data num">${i.name === '恐惧贪婪' && /^\d+$/.test(data) ? fngGauge(+data, concl)
+        : i.name === 'BTC 现货 ETF 资金流' && d.macro?.etf ? etfCell(d.macro.etf)
+        : i.name === '杠杆情绪' && d.macro?.funding ? levCell(d.macro) : esc(data)}</td>
+      <td><span class="chip ${s}">${CHIP[i.score]}</span></td>
+    </tr>`;
+  };
+  const heroRows = HERO_INDS.map((name) => d.indicators.find((i) => i.name === name)).filter(Boolean).map(row).join('');
+
+  $('#app').innerHTML = `
+    ${changesPanel(d)}
+    ${levelsPanel(d.levels, d.asof?.levels)}
+    <section class="panel hero" aria-label="今日环境灯">
+      <div class="lamps" role="img" aria-label="${esc(d.light_name)}">${lamps}</div>
+      <div>
+        <div class="verdict-top">
+          <div class="verdict-name fun ${d.light}">${esc(d.light_name)}</div>
+          <span class="score num">综合 ${sign}${d.score} 分</span>
+        </div>
+        <p class="reason">${esc(d.reason)}</p>
+        <ul class="rules" aria-label="灯色规则">${RULES.map((r) => `<li class="${r.light} ${r.light === d.light ? 'on' : ''}">
+          <span class="t fun">${r.icon} ${r.name}</span><span>${r.cond}</span></li>`).join('')}</ul>
+        <p class="rules-note">综合分：八项指标各打 +1 / 0 / −1，BTC 趋势 ×2 · 阈值以后用回测调整</p>
+        ${historyStrip(d.history || [])}
+      </div>
+      <table class="hero-table">
+        <thead><tr><th>指标</th><th>状态</th><th>数据</th><th>打分</th></tr></thead>
+        <tbody>${heroRows}</tbody>
+      </table>
+    </section>
+    <div class="section-head"><h2 class="fun">BTC 日线 · 近 ${d.btc.closes.length} 天</h2><p>${esc(d.asof?.btc || '')}（UTC 日线，北京时间每天 8:00 收盘）</p></div>
+    <section class="panel chart-card">
+      <div class="legend">${SERIES.map((s) => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>
+      <div class="chart" id="chart"></div>
+      ${maToday(d.btc)}
+      <div class="explain">
+        <div><b class="fun"><i style="background:var(--series-2)"></i>MA20：短期成本线</b>
+          最近 20 天收盘价的平均值，约等于近一个月买入者的平均成本。价格在它上方，说明短期买的人大多赚钱，买盘占优；跌破它，短期动能转弱。</div>
+        <div><b class="fun"><i style="background:var(--series-3)"></i>MA50：中期趋势线</b>
+          最近 50 天收盘价的平均值，大约两个半月，反映中期方向。它走得慢，不会被几天的涨跌带偏，常被当作牛熊的分界参考。</div>
+        <div><b class="fun">怎么看三者的位置</b><ul>
+          <li><em class="up">多头排列</em>：收盘 &gt; MA20 &gt; MA50，短中期都向上，环境灯可以亮绿灯</li>
+          <li><em class="down">空头排列</em>：收盘 &lt; MA20 &lt; MA50，直接红灯，山寨跌得更狠</li>
+          <li><em>均线纠缠</em>：其他情况，方向不明，最多黄灯</li>
+        </ul></div>
+      </div>
+      <details><summary>查看数据表</summary><div class="table-wrap"><table class="num">
+        <thead><tr><th>日期</th>${SERIES.map((s) => `<th>${s.name}</th>`).join('')}</tr></thead>
+        <tbody>${d.btc.dates.map((dt, i) => `<tr><td>${dt}</td>${SERIES.map((s) => `<td>${fmt(d.btc[s.key][i])}</td>`).join('')}</tr>`).reverse().join('')}</tbody>
+      </table></div></details>
+    </section>
+
+    <div class="section-head"><h2 class="fun">宏观指标</h2><p>和上面五项一起算综合分：每项 +1 利好 / 0 中性 / −1 利空，缺失的不计分</p></div>
+    <section class="macro-list">${MACRO.map((c) => macroPanel(c, d)).join('')}${levPanel(d)}${etfPanel(d)}${premiumPanel(d)}</section>
+
+    <div class="section-head"><h2 class="fun">行业快讯</h2><p>来源 PANews · 每 5 分钟更新 · 默认只显示和 BTC 相关的</p></div>
+    <section class="news" id="news"></section>
+
+    <div class="section-head"><h2 class="fun">未来 7 天</h2><p>北京时间 · 美国中高影响数据来自 ForexFactory 本周日历，另加美联储议息日程</p></div>
+    ${agendaPanel(d.agenda || [])}`;
+  renderMascot(d.light);
+  drawCharts();
+  renderNews();
+  document.querySelectorAll('.jump').forEach((a) => a.addEventListener('click', (ev) => {   // 平滑滚到详情面板，并闪一下提示位置
+    ev.preventDefault();
+    const panel = document.querySelector(a.getAttribute('href'));
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    panel.classList.remove('flash');
+    void panel.offsetWidth;
+    panel.classList.add('flash');
+  }));
+}
+
+// 强势山寨在单独的页面；这里只拿候选名单，给消息里提到的币打标签
+let altNames = [];
+async function loadAltNames(refresh = false) {
+  try {
+    if (STATIC_SITE) return;   // 静态网页不带强势山寨数据
+    const r = await fetch(api('alts', refresh));
+    if (r.ok) { altNames = (await r.json()).candidates.map((a) => a.name); renderNews(); }
+  } catch (e) { /* 拿不到就不打标签 */ }
+}
+
+const FLASH_TAGS = ['全部', '宏观', 'ETF', '监管', '安全', '解锁', '巨鲸', '币安'];
+// 只看 BTC 相关：标题里提到 BTC 本身、ETF、美联储和宏观数据、监管、稳定币、爆仓巨鲸这些
+const BTC_NEWS = /比特币|BTC|Bitcoin|ETF|贝莱德|IBIT|Strategy|MSTR|Saylor|美联储|鲍威尔|降息|加息|CPI|PCE|非农|美债|国债|关税|稳定币|USDT|USDC|Tether|SEC|CFTC|监管|矿工|算力|巨鲸|爆仓|清算/;
+let news = null, newsFilter = '全部', newsAll = false;
+
+function ago(iso) {
+  const t = new Date(iso), m = Math.round((Date.now() - t) / 60000);
+  if (m < 1) return '刚刚';
+  if (m < 60) return `${m} 分钟前`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)} 小时前`;
+  return `${t.getMonth() + 1}月${t.getDate()}日`;
+}
+
+function newsItem(n) {
+  const cls = (t) => (t === '下架' ? 'hot' : t === '上新' ? 'new' : '');
+  let tags = n.tags.map((t) => `<span class="ntag ${cls(t)}">${esc(t)}</span>`).join('');
+  for (const name of altNames) {
+    if (new RegExp(`(^|[^A-Za-z])${name}([^A-Za-z]|$)`).test(n.title)) tags = `<span class="ntag new">候选 ${esc(name)}</span>` + tags;
+  }
+  if (n.danger && !n.tags.includes('下架')) tags = `<span class="ntag hot">⚠️ 注意</span>` + tags;
+  return `<li class="${n.danger ? 'danger' : ''}">
+    <div>${tags}<span class="when">${ago(n.time)}</span></div>
+    <a href="${esc(n.url)}" target="_blank" rel="noopener">${esc(n.title)}</a>
+    ${n.summary ? `<div class="sum">${esc(n.summary)}</div>` : ''}
+  </li>`;
+}
+
+function renderNews() {
+  const box = $('#news');
+  if (!box) return;
+  if (!news) { box.innerHTML = `<div class="panel empty fun">海星正在翻报纸…</div>`; return; }
+  const pool = newsAll ? news.flash : news.flash.filter((n) => BTC_NEWS.test(n.title));
+  const count = (t) => (t === '全部' ? pool.length : pool.filter((n) => n.tags.includes(t)).length);
+  const filtered = newsFilter === '全部' ? pool : pool.filter((n) => n.tags.includes(newsFilter));
+  const flash = REPORT ? filtered.slice(0, 8) : filtered;   // 日报图片只放前 8 条
+  const err = (name) => (news.errors.includes(name) ? `<div class="empty">${name} 拉取失败，稍后点"刷新数据"</div>` : '');
+  box.innerHTML = `
+    <div class="panel">
+      <div class="filters">${FLASH_TAGS.map((t) => `<button type="button" data-t="${t}" class="${t === newsFilter ? 'on' : ''}">${t}<span>${count(t)}</span></button>`).join('')}
+        <button type="button" class="all-toggle">${newsAll ? '只看 BTC 相关' : `显示全部 ${news.flash.length} 条`}</button></div>
+      ${err('PANews')}<ul class="feed">${flash.map(newsItem).join('') || '<li class="empty">这个分类暂时没有消息</li>'}</ul></div>`;
+  box.querySelectorAll('.filters button[data-t]').forEach((b) => b.addEventListener('click', () => { newsFilter = b.dataset.t; renderNews(); }));
+  box.querySelector('.all-toggle').addEventListener('click', () => { newsAll = !newsAll; renderNews(); });
+  renderMacroNews();
+}
+
+async function loadNews(refresh = false) {
+  try {
+    const r = await fetch(api('news', refresh));
+    if (!r.ok) throw new Error(`服务返回 ${r.status}`);
+    news = await r.json();
+  } catch (e) {
+    news = { flash: [], errors: ['PANews'] };
+  }
+  renderNews();
+}
+
+// 用今天的数据说清楚三条线的位置关系，和后端 regime.py 的判断一致
+function maToday(btc) {
+  const n = btc.closes.length;
+  const c = btc.closes[n - 1], m20 = btc.ma20[n - 1], m50 = btc.ma50[n - 1];
+  const slope = m20 > btc.ma20[n - 6] ? '向上' : '向下';
+  let cls = '', state;
+  if (c > m20 && m20 > m50) { cls = 'up'; state = '多头排列'; }
+  else if (c < m20 && m20 < m50) { cls = 'down'; state = '空头排列'; }
+  else state = '均线纠缠，方向不明';
+  const pos = (v, name) => `${c > v ? '在' : '跌破'} ${name}（${fmt(v)}）${c > v ? '上方' : ''}`;
+  return `<div class="today ${cls} num"><small class="fun">今天</small>收盘 ${fmt(c)}，${pos(m20, 'MA20')}，${pos(m50, 'MA50')}；`
+    + `MA20 近 5 天${slope} → <b>${state}</b></div>`;
+}
+
+function niceStep(raw) {
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+// 通用折线图：dates 和每条线的 values 一一对应；带十字线和提示框
+// opts: height, yFmt(v, step) 轴刻度, vFmt(v) 提示框数值, endLabels 线尾标名字, label 无障碍描述
+function lineChart(box, dates, series, opts) {
+  box.querySelector('svg')?.remove();
+  let tip = box.querySelector('.tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'tip'; box.appendChild(tip); }
+  const W = box.clientWidth, H = opts.height;
+  const m = { t: 10, r: opts.endLabels ? 48 : 12, b: 26, l: 52 };
+  const n = dates.length;
+  const vals = series.flatMap((s) => s.values).filter((v) => v != null);
+  const step = niceStep((Math.max(...vals) - Math.min(...vals)) / 4 || Math.abs(vals[0]) / 100 || 1);
+  const lo = Math.floor(Math.min(...vals) / step) * step, hi = Math.ceil(Math.max(...vals) / step) * step || lo + step;
+  const x = (i) => m.l + (i * (W - m.l - m.r)) / (n - 1);
+  const y = (v) => m.t + ((hi - v) * (H - m.t - m.b)) / (hi - lo);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let v = lo; v <= hi + step / 1e6; v += step) {
+    svg += `<line class="grid-line" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/>`;
+    svg += `<text class="axis-text num" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${opts.yFmt(v, step)}</text>`;
+  }
+  const every = Math.ceil(n / (W < 500 ? 3 : W < 800 ? 5 : 7));
+  for (let i = n - 1; i >= 0; i -= every) {
+    svg += `<text class="axis-text num" x="${x(i)}" y="${H - 6}" text-anchor="middle">${dates[i].slice(5)}</text>`;
+  }
+  for (const s of series) {
+    let d = '', pen = false;
+    s.values.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      pen = true;
+    });
+    svg += `<path class="line" d="${d}" stroke="${s.color}"/>`;
+  }
+  if (opts.endLabels) {   // 线尾直接标名字，太挤时上下错开
+    const ends = series.map((s) => ({ name: s.name, y: y(s.values[n - 1]) })).sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 13);
+    for (const e of ends) svg += `<text class="end-label" x="${W - m.r + 6}" y="${e.y + 4}">${e.name}</text>`;
+  }
+  svg += `<g class="cross-g" style="display:none"><line class="cross" y1="${m.t}" y2="${H - m.b}"/>`;
+  series.forEach((s, k) => { svg += `<circle class="dot" r="4" fill="${s.color}" data-k="${k}"/>`; });
+  svg += `</g><rect class="hit" x="${m.l}" y="0" width="${W - m.l - m.r}" height="${H}" fill="transparent"/></svg>`;
+  box.insertAdjacentHTML('afterbegin', svg);
+
+  const cross = box.querySelector('.cross-g');
+  const hit = box.querySelector('.hit');
+  hit.addEventListener('pointermove', (ev) => {
+    const r = box.getBoundingClientRect();
+    const i = Math.max(0, Math.min(n - 1, Math.round(((ev.clientX - r.left - m.l) / (W - m.l - m.r)) * (n - 1))));
+    const cx = x(i);
+    cross.style.display = '';
+    cross.querySelector('line').setAttribute('x1', cx);
+    cross.querySelector('line').setAttribute('x2', cx);
+    cross.querySelectorAll('circle').forEach((c) => {
+      const v = series[c.dataset.k].values[i];
+      c.style.display = v == null ? 'none' : '';
+      if (v != null) { c.setAttribute('cx', cx); c.setAttribute('cy', y(v)); }
+    });
+    tip.innerHTML = `<div class="d num">${dates[i]}</div>` + series.map((s) =>
+      `<div class="r"><span><i style="background:${s.color}"></i>${s.name}</span><b class="num">${s.values[i] == null ? '—' : opts.vFmt(s.values[i])}</b></div>`).join('');
+    tip.style.display = 'block';
+    tip.style.left = `${cx + 14 + tip.offsetWidth > W ? cx - 14 - tip.offsetWidth : cx + 14}px`;
+    tip.style.top = `${m.t}px`;
+  });
+  hit.addEventListener('pointerleave', () => { cross.style.display = 'none'; tip.style.display = 'none'; });
+}
+
+const kFmt = (v, step) => `${(v / 1000).toFixed(step >= 1000 ? 0 : 1)}k`;
+const maOf = (vals, n) => vals.map((_, i) => (i >= n - 1 ? vals.slice(i - n + 1, i + 1).reduce((a, b) => a + b, 0) / n : null));
+
+function drawCharts() {
+  const btc = current.btc;
+  lineChart($('#chart'), btc.dates, SERIES.map((s) => ({ name: s.name, color: s.color, values: btc[s.key] })),
+    { height: window.innerWidth < 640 ? 220 : 280, yFmt: kFmt, vFmt: fmt, endLabels: true, label: 'BTC 日线收盘价与 MA20、MA50' });
+  for (const c of MACRO) for (const ser of c.series) {
+    const box = $(`#mc-${ser.key}`), d = current.macro?.[ser.key];
+    if (!box || !d) continue;
+    const vals = d.values, cut = Math.max(0, vals.length - MACRO_DAYS);
+    const lines = [{ name: ser.name, color: 'var(--series-1)', values: vals }];
+    if (ser.ma) lines.push({ name: 'MA20', color: 'var(--series-2)', values: maOf(vals, 20) },
+                           { name: 'MA50', color: 'var(--series-3)', values: maOf(vals, 50) });
+    lineChart(box, d.dates.slice(cut), lines.map((l) => ({ ...l, values: l.values.slice(cut) })),
+      { height: c.series.length > 1 ? 170 : 200, yFmt: ser.yFmt, vFmt: ser.vFmt, endLabels: !!ser.ma, label: `${ser.name}近 ${MACRO_DAYS} 天走势` });
+  }
+  const mc = current.macro || {};
+  if (mc.funding && $('#mc-funding')) {
+    barChart($('#mc-funding'), mc.funding.dates, mc.funding.values, {
+      height: 190, label: '近 30 天资金费率', name: '资金费率', vFmt: (v) => fundPct(v, 4),
+      yFmt: (v) => fundPct(v, 2), pos: 'var(--series-1)', neg: 'var(--critical)', refs: [{ v: FUNDING_HOT, label: '过热线 0.03%' }],
+    });
+  }
+  if (mc.oi && $('#mc-oi')) {
+    // 持仓量和 BTC 价格都换算成"第一天 = 100"，放在同一个坐标轴上比
+    const price = Object.fromEntries(current.btc.dates.map((dt, i) => [dt, current.btc.closes[i]]));
+    const days = mc.oi.dates.filter((dt) => price[dt] != null);
+    const oiBy = Object.fromEntries(mc.oi.dates.map((dt, i) => [dt, mc.oi.values[i]]));
+    const idx = (vals) => vals.map((v) => (v / vals[0]) * 100);
+    if (days.length > 1) {
+      lineChart($('#mc-oi'), days, [
+        { name: '持仓量', color: 'var(--series-2)', values: idx(days.map((dt) => oiBy[dt])) },
+        { name: 'BTC 价格', color: 'var(--series-1)', values: idx(days.map((dt) => price[dt])) },
+      ], { height: 190, yFmt: (v, st) => v.toFixed(st >= 1 ? 0 : 1), vFmt: (v) => v.toFixed(1), endLabels: true, label: '持仓量与 BTC 价格对比，第一天为 100' });
+    }
+  }
+  if (mc.premium && $('#mc-premium')) {
+    barChart($('#mc-premium'), mc.premium.dates, mc.premium.values, {
+      height: 190, label: 'Coinbase 溢价近 7 天（每小时）', name: 'Coinbase 溢价', vFmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(3)}%`,
+      yFmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`, pos: 'var(--series-1)', neg: 'var(--critical)',
+    });
+  }
+  const etf = current.macro?.etf;
+  if (etf && $('#mc-etf')) {
+    barChart($('#mc-etf'), etf.dates.slice(-ETF_DAYS), etf.values.slice(-ETF_DAYS), {
+      height: 200, label: `ETF 近 ${ETF_DAYS} 个交易日净流入`, name: '净流入', vFmt: money, pos: 'var(--good)', neg: 'var(--critical)',
+      yFmt: (v) => (v === 0 ? '0' : `${v < 0 ? '−' : ''}${Math.abs(v) >= 1000 ? `${(Math.abs(v) / 1000).toFixed(1)}B` : `${Math.abs(v).toFixed(0)}M`}`),
+    });
+  }
+}
+
+// ---- 三个宏观指标的详细面板 ----
+const MACRO_DAYS = 90;
+const MACRO = [
+  {
+    ind: '纳斯达克', news: /美股|纳指|纳斯达克|标普|道指|英伟达|科技股|财报/,
+    why: '加密货币和美股科技股的联动很强。纳指走弱时整体风险偏好下降，BTC 和山寨通常也跟着承压。'
+      + '打分方式和 BTC 一样：收盘 > MA20 > MA50 计 +1，收盘 < MA20 < MA50 计 −1，其余 0。',
+    series: [{ key: 'nasdaq', name: '纳斯达克', ma: true, yFmt: kFmt, vFmt: fmt, chg: [[1, '1日'], [5, '5日'], [20, '20日']], unit: 'pct' }],
+  },
+  {
+    ind: '美元/美债', news: /美联储|降息|加息|美债|国债|美元指数|CPI|PCE|非农|鲍威尔|FOMC|通胀|失业率/,
+    why: '美元指数和美债收益率上升，代表美元走强、资金成本变高，对 BTC 这类风险资产是压力；两者回落则是顺风。'
+      + '打分：20 个交易日美元涨超 1.5% 或 10 年期收益率升超 0.25 个百分点计 −1，美元跌超 1.5% 计 +1，其余 0。',
+    series: [
+      { key: 'dxy', name: '美元指数', yFmt: (v, st) => v.toFixed(st >= 1 ? 0 : 1), vFmt: (v) => v.toFixed(2),
+        chg: [[1, '1日'], [5, '5日'], [20, '20日']], unit: 'pct' },
+      { key: 'us10y', name: '美债 10 年收益率', yFmt: (v, st) => `${v.toFixed(st >= 0.1 ? 1 : 2)}%`, vFmt: (v) => `${v.toFixed(3)}%`,
+        chg: [[1, '1日'], [5, '5日'], [20, '20日']], unit: 'bp' },
+    ],
+  },
+  {
+    ind: '稳定币总量', news: /稳定币|Tether|Circle|(^|[^A-Za-z])(USDT|USDC|USDe|RLUSD|PYUSD)([^A-Za-z]|$)/,
+    why: '稳定币是场内的“弹药”。总量增加说明有新资金换成稳定币进场，减少说明资金在离场。'
+      + '打分：30 天增加 2% 以上计 +1，减少 1% 以上计 −1，其余 0。',
+    series: [{ key: 'stables', name: '稳定币总市值', yFmt: (v, st) => `$${(v / 1e9).toFixed(st >= 1e9 ? 0 : 1)}B`,
+      vFmt: (v) => `$${(v / 1e9).toFixed(2)}B`, chg: [[1, '1日'], [7, '7日'], [30, '30日']], unit: 'pct' }],
+  },
+];
+
+// 涨跌只标方向（▲▼），不上红绿色：美元、利率上涨对加密是压力，颜色容易误导
+function chgPills(vals, ser) {
+  return ser.chg.map(([k, label]) => {
+    if (vals.length <= k) return '';
+    const a = vals[vals.length - 1 - k], b = vals[vals.length - 1];
+    const diff = ser.unit === 'bp' ? Math.round((b - a) * 100) : r1((b / a - 1) * 100);
+    const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '';
+    return `<span class="chg num">${label} ${arrow}${ser.unit === 'bp' ? `${Math.abs(diff)}bp` : `${Math.abs(diff).toFixed(1)}%`}</span>`;
+  }).join('');
+}
+
+function macroPanel(c, d) {
+  const ind = d.indicators.find((i) => i.name === c.ind);
+  const s = ind?.score == null ? 'missing' : `s${ind.score}`;
+  const concl = ind ? split(ind.text).concl : '数据缺失';
+  const charts = c.series.map((ser) => {
+    const m = d.macro?.[ser.key];
+    if (!m) return `<div class="mseries"><div class="stat"><small>${ser.name}</small><b>—</b></div><div class="empty">数据缺失</div></div>`;
+    return `<div class="mseries">
+      <div class="stat"><small>${ser.name}</small><b class="num">${ser.vFmt(m.values.at(-1))}</b>${chgPills(m.values, ser)}</div>
+      <div class="chart mchart" id="mc-${ser.key}"></div>
+    </div>`;
+  }).join('');
+  return `<div class="panel macro">
+    <div class="macro-head"><h3 class="fun">${c.ind}</h3><span class="chip ${s}">${CHIP[ind?.score ?? null]}</span><span class="macro-concl">${esc(concl)}</span>
+      <span class="asof">截至 ${esc(d.asof?.[c.series[0].key] || '—')}</span></div>
+    <div class="macro-charts ${c.series.length > 1 ? 'two' : ''}">${charts}</div>
+    <div class="macro-more">
+      <details class="drop"><summary class="fun">为什么看它</summary><div class="drop-body why">${c.why}</div></details>
+      <details class="drop"><summary class="fun">相关快讯 <span class="cnt" id="mc-cnt-${c.ind}"></span></summary>
+        <ul class="drop-body feed" id="mn-${c.ind}"><li class="empty">海星正在翻报纸…</li></ul></details>
+    </div>
+  </div>`;
+}
+
+// 从 PANews 快讯里挑出和每个宏观指标相关的最新 3 条；只看标题，摘要里的词太杂
+function renderMacroNews() {
+  if (!news) return;
+  for (const c of [...MACRO, LEV_PANEL, ETF_PANEL, PREM_PANEL]) {
+    const box = document.getElementById(`mn-${c.ind}`);
+    if (!box) continue;
+    const hits = news.flash.filter((n) => c.news.test(n.title)).slice(0, 3);
+    box.innerHTML = hits.map(newsItem).join('') || '<li class="empty">最近没有相关快讯</li>';
+    document.getElementById(`mc-cnt-${c.ind}`).textContent = hits.length;
+  }
+}
+
+let current = null;
+async function load(refresh = false) {
+  const btn = $('#refresh');
+  btn.disabled = true;
+  btn.textContent = '捞数据中…';
+  try {
+    const r = await fetch(api('regime', refresh));
+    if (!r.ok) throw new Error(`服务返回 ${r.status}`);
+    current = await r.json();
+    render(current);
+  } catch (e) {
+    if (!current) $('#app').innerHTML = `<div class="panel state err">数据拉取失败：${esc(e.message)}<br>检查代理（.env 里的 HTTPS_PROXY）后点"刷新数据"</div>`;
+    else alert(`刷新失败：${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '刷新数据';
+  }
+}
+
+$('#refresh').addEventListener('click', () => { load(true); loadAltNames(true); loadNews(true); });
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => current && drawCharts(), 150);
+});
+// 全部加载完后把整页高度写到 <html data-report-h>，截图脚本按这个高度截
+Promise.all([load(), loadAltNames(), loadNews()]).then(() => setTimeout(() => {
+  document.documentElement.dataset.reportH = Math.ceil(document.documentElement.scrollHeight);
+}, 500));
+</script>
+</body>
+</html>
