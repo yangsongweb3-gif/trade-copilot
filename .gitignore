@@ -1,0 +1,10 @@
+# 本机配置和私人数据，不提交
+.env
+config/plans.yaml
+data/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/

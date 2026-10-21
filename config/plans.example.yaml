@@ -1,0 +1,44 @@
+# 交易计划示例（数字都是虚构的）。复制成 plans.yaml 再改成自己的（plans.yaml 不会提交到 git）。
+# 系统只按这里的规则提醒，不会下单。价格单位都是 USDT。
+
+settings:
+  account_usdt: 10000       # 账户规模，用来按风险算建议仓位
+  risk_per_trade_pct: 2     # 单笔最多亏账户的 2%
+  no_chase_pct_24h: 20      # 计划里的币 24 小时涨超 20% → 提醒“按规则不追”
+
+# 强势山寨扫描（网页上的"强势山寨候选"）。不写就用代码里的默认值
+scanner:
+  hold: [BTC, ETH]            # 长期持有，不参与扫描
+  rank_min: 5                 # 市值排名区间
+  rank_max: 50
+  min_quote_volume: 10000000  # 24 小时成交额至少 1000 万 U
+
+plans:
+  # ---- 回踩买入：到买入区提醒，附建议仓位 ----
+  - id: link-a
+    symbol: LINKUSDT
+    note: 计划 A：回踩 14.0–14.4 挂限价买
+    buy_zone: [14.0, 14.4]  # 现价进入这个区间 → 提醒
+    stop: 13.2              # 现价跌破 → 紧急提醒（如果已经买了）
+    targets: [16.5, 18.5]   # 现价到达 → 提醒止盈
+    max_usdt: 2000          # 这个计划最多投入多少
+    cancel_if:              # 任一条件满足 → 紧急提醒计划作废
+      - symbol: BTCUSDT
+        close_below: 75000  # BTC 日线收盘跌破 75,000
+
+  # ---- 突破买入：日线收盘站上某价位才提醒 ----
+  - id: link-b
+    symbol: LINKUSDT
+    note: 计划 B：日线收盘站上 16 且放量后再买
+    close_above: 16
+    stop: 15
+    targets: [19]
+    cancel_if:
+      - symbol: BTCUSDT
+        close_below: 75000
+
+  # ---- 持仓管理：均线规则 ----
+  - id: eth-hold
+    symbol: ETHUSDT
+    note: 分三段卖出，不一次全卖
+    close_below_ma: 20      # 日线收盘跌破 20 日均线 → 提醒卖最后一段

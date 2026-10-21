@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>强势山寨 · trade-copilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bubbles" aria-hidden="true" id="bubbles"></div>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">TRADE-COPILOT</div>
+      <div class="sub">
+        <nav class="nav"><a href="/" class="tag fun">今日环境灯</a><a href="/alts" class="tag fun on">强势山寨</a></nav>
+        <button id="refresh" class="btn fun" type="button">刷新数据</button>
+        <span id="updated" class="updated num"></span>
+      </div>
+    </div>
+    <div class="head-right">
+      <div class="mascot" id="mascot"></div>
+      <div class="panel qr">
+        <img src="/static/qq-group-qrcode.png" alt="听星观宇 QQ 群二维码">
+        <div class="qn fun">听星观宇</div>
+        <div class="qc">扫码加入 QQ 群</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="light"></div>
+    <div class="section-head" style="margin-top:0"><h2 class="fun">强势山寨候选</h2><p id="alts-note">近 7 天、14 天都跑赢 BTC 的币，按强弱排序</p></div>
+    <section id="alts"><div class="panel state fun">海星正在比谁游得比 BTC 快…</div></section>
+  </main>
+
+  <footer><span>只整理信息，不构成投资建议；怎么做由自己判断，系统不会下单。</span></footer>
+</div>
+
+<script src="/static/common.js"></script>
+<script>
+let alts = null;
+
+// 相对 BTC 的走势小图：虚线是 100（和 BTC 一样），线在上面就是跑赢
+function spark(vals) {
+  const W = 120, H = 36, lo = Math.min(100, ...vals), hi = Math.max(100, ...vals);
+  const x = (i) => (i * W) / (vals.length - 1), y = (v) => H - ((v - lo) * H) / (hi - lo || 1);
+  const d = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="相对 BTC 走势，最新 ${vals.at(-1).toFixed(0)}">
+    <line x1="0" x2="${W}" y1="${y(100)}" y2="${y(100)}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+    <path d="${d}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+function altCard(a, i) {
+  const c = r1(a.pct_24h) > 0 ? 's1' : r1(a.pct_24h) < 0 ? 's-1' : '';
+  const tags = [
+    a.volume_up ? `<span class="ntag new">放量 ${a.vol_ratio.toFixed(1)}×</span>` : `<span class="ntag">量比 ${a.vol_ratio.toFixed(1)}×</span>`,
+    a.above_ma20 ? '<span class="ntag new">站上 MA20</span>' : '<span class="ntag warn">在 MA20 下方</span>',
+    a.no_chase ? `<span class="ntag hot">⚠️ 24h 涨超 ${alts.no_chase_pct}%</span>` : '',
+  ].join('');
+  return `<div class="panel alt">
+    <div class="alt-head"><span class="rankno fun">#${i + 1}</span><span class="alt-name fun">${esc(a.name)}</span>
+      <span class="mc">市值 #${a.rank}</span><span class="chip ${c} num">24h ${pctStr(a.pct_24h)}</span></div>
+    <div class="alt-price num">${price(a.price)} <small>USDT · 成交 ${(a.quote_volume / 1e6).toFixed(0)}M</small></div>
+    <div class="alt-rs"><div><small>7 天跑赢 BTC</small><b class="num">${pctStr(a.rs7)}</b></div>
+      <div><small>14 天跑赢 BTC</small><b class="num">${pctStr(a.rs14)}</b></div></div>
+    <div class="alt-spark">${spark(a.vs_btc)}<small>近 30 天相对 BTC 走势（虚线 = 和 BTC 一样）</small></div>
+    <div class="alt-tags">${tags}</div>
+  </div>`;
+}
+
+function renderAlts() {
+  const box = $('#alts');
+  if (!box) return;
+  if (!alts) { box.innerHTML = '<div class="panel empty fun">海星正在比谁游得比 BTC 快…</div>'; return; }
+  if (alts.error) { box.innerHTML = `<div class="panel state err">扫描失败：${esc(alts.error)}，稍后点"刷新数据"</div>`; return; }
+  $('#updated').textContent = `更新于 ${alts.updated_at}`;
+  $('#alts-note').textContent = `市值 #${alts.rank_min}–#${alts.rank_max}，成交额 ≥ ${alts.min_quote_volume / 1e6}M，`
+    + `排除长期持仓 ${alts.hold.join('/')}；近 7 天、14 天都跑赢 BTC 才入选`;
+  const cell = (v) => `<td class="${r1(v) > 0 ? 'up' : r1(v) < 0 ? 'down' : ''}">${pctStr(v)}</td>`;
+  box.innerHTML = `
+    <div class="alts">${alts.candidates.map(altCard).join('') || '<div class="panel empty">今天没有 7 天、14 天都跑赢 BTC 的币</div>'}</div>
+    <details class="panel alt-table" open><summary>查看全部扫描结果（${alts.all.length} 个币，${alts.updated_at}）</summary><div class="table-wrap"><table class="num">
+      <thead><tr><th>币</th><th>市值排名</th><th>24h</th><th>7 天 vs BTC</th><th>14 天 vs BTC</th><th>量比</th><th>MA20</th></tr></thead>
+      <tbody>${alts.all.map((a) => `<tr class="${a.strong ? 'strong' : ''}"><td>${esc(a.name)}</td><td>#${a.rank}</td>${cell(a.pct_24h)}${cell(a.rs7)}${cell(a.rs14)}`
+        + `<td>${a.vol_ratio.toFixed(1)}×</td><td>${a.above_ma20 ? '上方' : '下方'}</td></tr>`).join('')}</tbody>
+    </table></div></details>`;
+}
+
+// 顶部显示今天的环境灯，点一下回首页看详情
+async function loadLight() {
+  try {
+    const r = await fetch('/api/regime');
+    if (!r.ok) return;
+    const d = await r.json();
+    renderMascot(d.light);
+    $('#light').innerHTML = `<a class="light-chip fun" href="/">今日环境灯 <b class="${d.light}">${LIGHT_ICON[d.light]} ${esc(d.light_name)}</b>`
+      + `<small>${esc(d.reason)} →</small></a>`;
+  } catch (e) { /* 拿不到就不显示 */ }
+}
+
+async function loadAlts(refresh = false) {
+  const btn = $('#refresh');
+  btn.disabled = true;
+  btn.textContent = '捞数据中…';
+  try {
+    const r = await fetch(`/api/alts${refresh ? '?refresh=true' : ''}`);
+    if (!r.ok) throw new Error(`服务返回 ${r.status}`);
+    alts = await r.json();
+  } catch (e) {
+    alts = { error: e.message };
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '刷新数据';
+  }
+  renderAlts();
+}
+
+$('#refresh').addEventListener('click', () => loadAlts(true));
+loadAlts();
+loadLight();
+</script>
+</body>
+</html>
