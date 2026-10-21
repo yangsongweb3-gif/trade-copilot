@@ -1,7 +1,7 @@
 # 本机配置和私人数据，不提交
 .env
 config/plans.yaml
-data/
+/data/                 # 只忽略根目录的 data/（快照、日志）；site/ 里的 data/ 要提交
 
 # Python
 .venv/
