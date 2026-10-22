@@ -536,22 +536,3 @@ footer span { padding: 2px 12px; border-radius: 999px; background: rgb(10 30 50 
 
 /* GitHub Pages 上的静态网页：数据是导出时的快照，不能刷新，也没有强势山寨页 */
 .static-site .nav, .static-site #refresh { display: none !important; }
-
-/* 发 X 用的 16:9 小图（?xcard=1~4）：固定一屏，顶部标题、底部网址 */
-.xcard .wrap { max-width: none; height: 100vh; padding: 0; }
-.xcard-box { box-sizing: border-box; height: 100vh; display: flex; flex-direction: column; padding: 18px 28px 14px; }
-.xcard-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
-.xcard-head .logo { font-size: 28px; }
-.xcard-head .xt { font-size: 24px; color: #fff; padding: 2px 16px; border-radius: 999px; background: rgb(10 30 50 / 55%); }
-.xcard-head .xs { font-size: 20px; color: #1a1a1a; padding: 1px 14px; border: 3px solid #1a1a1a; border-radius: 10px; background: var(--sand); box-shadow: 3px 3px 0 #1a1a1a; transform: rotate(-1.5deg); }
-.xcard-head .xl { margin-left: auto; font-size: 24px; padding: 2px 16px; border: 3px solid #1a1a1a; border-radius: 999px; background: var(--paper); box-shadow: 3px 3px 0 #1a1a1a; }
-.xcard-head .xl.red { color: var(--critical-ink); }
-.xcard-head .xl.yellow { color: var(--warning-ink); }
-.xcard-head .xl.green { color: var(--good-ink); }
-.xcard-body { position: relative; flex: 1; overflow: hidden; }
-.xcard-inner { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; transform-origin: top left; }
-.xcard-inner > * { min-width: 0; }
-.xcard .changes, .xcard .lv-panel, .xcard .hero { margin: 0; }
-.xcard .explain, .xcard .chart-card details, .xcard .macro-more, .xcard .etf-link small, .xcard .chg-note { display: none !important; }
-.xcard-foot { margin-top: 10px; text-align: center; font-size: 16px; color: #fff; }
-.xcard-foot span { padding: 3px 16px; border-radius: 999px; background: rgb(10 30 50 / 55%); }

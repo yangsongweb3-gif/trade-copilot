@@ -41,10 +41,7 @@
 <script>
 // ?report=1：给 python -m copilot.report 截长图用，去掉按钮和动画；?qr=QQ号&qn=名字 换右上角二维码
 const PARAMS = new URLSearchParams(location.search);
-// ?xcard=1~4：发 X 用的 16:9 小图，每张只放一部分，自动缩放填满画面（也算图片模式）
-const X_CARD = Number(PARAMS.get('xcard')) || 0;
-const REPORT = PARAMS.has('report') || X_CARD > 0;
-if (X_CARD) document.body.classList.add('xcard');
+const REPORT = PARAMS.has('report');
 if (REPORT) document.body.classList.add('report');
 // 发布到 GitHub Pages 的静态网页：数据是导出时存下的 data/*.json，没有刷新和强势山寨页
 const STATIC_SITE = !!window.STATIC_SITE;
@@ -328,38 +325,6 @@ function agendaPanel(events) {
   return `<section class="panel agenda"><ul>${rows}</ul></section>`;
 }
 
-// ---- 发 X 用的 16:9 小图 ----
-const X_TITLES = { 1: '今日变化 · 关键价位', 2: '今日环境灯', 3: 'BTC 日线 · 近 60 天', 4: 'ETF 资金流 · 未来 7 天' };
-
-function buildXCard(d) {
-  const app = $('#app');
-  const parts = {
-    1: ['.changes', '.lv-panel'], 2: ['.hero'], 3: ['.chart-card'], 4: ['#macro-etf', '.agenda'],
-  }[X_CARD].map((sel) => app.querySelector(sel)).filter(Boolean);
-  const day = new Date(`${d.updated_at.slice(0, 10)}T00:00:00+08:00`);
-  const md = `${day.getMonth() + 1}/${day.getDate()} 周${'日一二三四五六'[day.getDay()]}`;
-  const wrap = $('.wrap');
-  wrap.innerHTML = `<div class="xcard-box">
-    <div class="xcard-head"><span class="logo">TRADE-COPILOT</span><span class="xt fun">BTC 每日面板 · ${md}</span>
-      <span class="xs fun">${X_TITLES[X_CARD]}</span><span class="xl ${d.light} fun">${LIGHT_ICON[d.light]} ${esc(d.light_name)}</span></div>
-    <div class="xcard-body xb${X_CARD}"><div class="xcard-inner"></div></div>
-    <div class="xcard-foot"><span>完整面板 yangsongweb3-gif.github.io/trade-copilot · 只整理数据，不构成投资建议</span></div>
-  </div>`;
-  const inner = wrap.querySelector('.xcard-inner'), body = wrap.querySelector('.xcard-body');
-  parts.forEach((el) => inner.appendChild(el));
-  // 按内容多少缩放：内容少就放大、多就缩小，宽度跟着反算，几轮之后基本稳定
-  let z = 1;
-  for (let i = 0; i < 5; i++) {
-    inner.style.width = `${body.clientWidth / z}px`;
-    drawCharts();
-    z = Math.min(1.6, body.clientHeight / inner.offsetHeight);   // 宽度是按 z 反算的，只需要看高度
-  }
-  // 最后按最终的 z 定宽度；如果因此变高，只缩小不改宽度（右边留点空，不会被切掉）
-  inner.style.width = `${body.clientWidth / z}px`;
-  drawCharts();
-  inner.style.transform = `scale(${Math.min(z, body.clientHeight / inner.offsetHeight)})`;
-}
-
 // "数据：结论" → 结论做标题，数据放下面
 function split(text) {
   const i = text.lastIndexOf('：');
@@ -439,7 +404,6 @@ function render(d) {
   renderMascot(d.light);
   drawCharts();
   renderNews();
-  if (X_CARD) buildXCard(d);
   document.querySelectorAll('.jump').forEach((a) => a.addEventListener('click', (ev) => {   // 平滑滚到详情面板，并闪一下提示位置
     ev.preventDefault();
     const panel = document.querySelector(a.getAttribute('href'));
@@ -607,7 +571,7 @@ const maOf = (vals, n) => vals.map((_, i) => (i >= n - 1 ? vals.slice(i - n + 1,
 
 function drawCharts() {
   const btc = current.btc;
-  if ($('#chart')) lineChart($('#chart'), btc.dates, SERIES.map((s) => ({ name: s.name, color: s.color, values: btc[s.key] })),
+  lineChart($('#chart'), btc.dates, SERIES.map((s) => ({ name: s.name, color: s.color, values: btc[s.key] })),
     { height: window.innerWidth < 640 ? 220 : 280, yFmt: kFmt, vFmt: fmt, endLabels: true, label: 'BTC 日线收盘价与 MA20、MA50' });
   for (const c of MACRO) for (const ser of c.series) {
     const box = $(`#mc-${ser.key}`), d = current.macro?.[ser.key];
