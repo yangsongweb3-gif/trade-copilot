@@ -76,15 +76,28 @@ class Macro:
         rows = self._get('https://api.alternative.me/fng/', limit=days)['data']
         return [(datetime.fromtimestamp(int(r['timestamp']), timezone.utc).date(), int(r['value'])) for r in reversed(rows)]
 
-    def market_cap_ranks(self) -> dict[str, int]:
-        """市值前 250 名：币种代码（大写）→ 排名。代码重名时保留排名靠前的。"""
+    def market_coins(self) -> dict[str, dict]:
+        """市值前 250 名：币种代码（大写）→ {rank, id（CoinGecko ID）, mcap}。代码重名时保留排名靠前的。"""
         rows = self._get('https://api.coingecko.com/api/v3/coins/markets',
                          vs_currency='usd', order='market_cap_desc', per_page=250, page=1)
-        ranks: dict[str, int] = {}
+        coins: dict[str, dict] = {}
         for r in rows:
             if r.get('market_cap_rank'):
-                ranks.setdefault(r['symbol'].upper(), r['market_cap_rank'])
-        return ranks
+                coins.setdefault(r['symbol'].upper(), {'rank': r['market_cap_rank'], 'id': r['id'], 'mcap': r.get('market_cap') or 0})
+        return coins
+
+    def llama_revenue(self) -> dict:
+        """DefiLlama 近 30 天手续费和协议收入的原始表，加上对应币用的协议、母协议、公链目录。
+        几个目录都很大，调用方要缓存。换算在 revenue.gecko_index / by_gecko。"""
+        get = lambda path, **q: self.session.get(f'https://api.llama.fi{path}', params=q, timeout=90).json()
+        q = {'excludeTotalDataChart': 'true', 'excludeTotalDataChartBreakdown': 'true'}
+        return {
+            'fees': get('/overview/fees', dataType='dailyFees', **q)['protocols'],
+            'revenue': get('/overview/fees', dataType='dailyRevenue', **q)['protocols'],
+            'protocols': get('/protocols'),
+            'parents': get('/lite/protocols2', b=2)['parentProtocols'],
+            'chains': get('/v2/chains'),
+        }
 
     def etf_flows(self) -> list[tuple[date, float, dict[str, float]]]:
         r = self.session.get(TFTC_ETF, timeout=self.timeout)

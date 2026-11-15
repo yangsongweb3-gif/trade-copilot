@@ -19,7 +19,7 @@ def test_universe_filters_rank_holdings_stables_and_volume():
     ranks = {'BTC': 1, 'XRP': 5, 'SOL': 7, 'USDC': 6, 'SUI': 29, 'LOW': 30, 'PEPE': 52, 'NOTLISTED': 20}
     tickers = {s + 'USDT': tick(s + 'USDT') for s in ['BTC', 'XRP', 'SOL', 'USDC', 'SUI', 'PEPE']}
     tickers['LOWUSDT'] = tick('LOWUSDT', qv=1e6)              # 成交额不够
-    assert universe(ranks, tickers, Scanner(hold=['BTC', 'SOL'])) == {'XRPUSDT': 5, 'SUIUSDT': 29}
+    assert universe(ranks, tickers, Scanner(hold=['BTC', 'SOL'], rank_max=50)) == {'XRPUSDT': 5, 'SUIUSDT': 29}   # PEPE #52 超出范围
 
 
 def test_score_relative_strength_volume_and_no_chase():

@@ -54,6 +54,16 @@ function spark(vals) {
     <path d="${d}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+// 真实收入：DefiLlama 近 30 天协议收入；市销率 = 市值 ÷ 年化收入，越低说明相对收入越"便宜"
+const usd = (v) => (v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${(v / 1e3).toFixed(0)}K`);
+const hasRevenue = (a) => a.ps != null;
+const psStr = (ps) => (ps >= 1000 ? '>1000×' : `${ps.toFixed(1)}×`);   // 收入极少的公链会算出几十万倍，没意义
+function revenueLine(a) {
+  if (!alts.revenue_ok) return '<div class="alt-rev muted">收入数据暂时拿不到</div>';
+  if (!hasRevenue(a)) return '<div class="alt-rev muted">暂无链上收入数据（DefiLlama）</div>';
+  return `<div class="alt-rev">近 30 天收入 <b class="num">${usd(a.rev30d)}</b> · 市销率 <b class="num">${psStr(a.ps)}</b></div>`;
+}
+
 function altCard(a, i) {
   const c = r1(a.pct_24h) > 0 ? 's1' : r1(a.pct_24h) < 0 ? 's-1' : '';
   const tags = [
@@ -65,6 +75,7 @@ function altCard(a, i) {
     <div class="alt-head"><span class="rankno fun">#${i + 1}</span><span class="alt-name fun">${esc(a.name)}</span>
       <span class="mc">市值 #${a.rank}</span><span class="chip ${c} num">24h ${pctStr(a.pct_24h)}</span></div>
     <div class="alt-price num">${price(a.price)} <small>USDT · 成交 ${(a.quote_volume / 1e6).toFixed(0)}M</small></div>
+    ${revenueLine(a)}
     <div class="alt-rs"><div><small>7 天跑赢 BTC</small><b class="num">${pctStr(a.rs7)}</b></div>
       <div><small>14 天跑赢 BTC</small><b class="num">${pctStr(a.rs14)}</b></div></div>
     <div class="alt-spark">${spark(a.vs_btc)}<small>近 30 天相对 BTC 走势（虚线 = 和 BTC 一样）</small></div>
@@ -79,14 +90,15 @@ function renderAlts() {
   if (alts.error) { box.innerHTML = `<div class="panel state err">扫描失败：${esc(alts.error)}，稍后点"刷新数据"</div>`; return; }
   $('#updated').textContent = `更新于 ${alts.updated_at}`;
   $('#alts-note').textContent = `市值 #${alts.rank_min}–#${alts.rank_max}，成交额 ≥ ${alts.min_quote_volume / 1e6}M，`
-    + `排除长期持仓 ${alts.hold.join('/')}；近 7 天、14 天都跑赢 BTC 才入选`;
+    + `排除长期持仓 ${alts.hold.join('/')}；近 7 天、14 天都跑赢 BTC 才入选；收入数据来自 DefiLlama`;
   const cell = (v) => `<td class="${r1(v) > 0 ? 'up' : r1(v) < 0 ? 'down' : ''}">${pctStr(v)}</td>`;
   box.innerHTML = `
     <div class="alts">${alts.candidates.map(altCard).join('') || '<div class="panel empty">今天没有 7 天、14 天都跑赢 BTC 的币</div>'}</div>
     <details class="panel alt-table" open><summary>查看全部扫描结果（${alts.all.length} 个币，${alts.updated_at}）</summary><div class="table-wrap"><table class="num">
-      <thead><tr><th>币</th><th>市值排名</th><th>24h</th><th>7 天 vs BTC</th><th>14 天 vs BTC</th><th>量比</th><th>MA20</th></tr></thead>
+      <thead><tr><th>币</th><th>市值排名</th><th>24h</th><th>7 天 vs BTC</th><th>14 天 vs BTC</th><th>量比</th><th>MA20</th><th>30 天收入</th><th>市销率</th></tr></thead>
       <tbody>${alts.all.map((a) => `<tr class="${a.strong ? 'strong' : ''}"><td>${esc(a.name)}</td><td>#${a.rank}</td>${cell(a.pct_24h)}${cell(a.rs7)}${cell(a.rs14)}`
-        + `<td>${a.vol_ratio.toFixed(1)}×</td><td>${a.above_ma20 ? '上方' : '下方'}</td></tr>`).join('')}</tbody>
+        + `<td>${a.vol_ratio.toFixed(1)}×</td><td>${a.above_ma20 ? '上方' : '下方'}</td>`
+        + `<td>${hasRevenue(a) ? usd(a.rev30d) : '—'}</td><td>${hasRevenue(a) ? psStr(a.ps) : '—'}</td></tr>`).join('')}</tbody>
     </table></div></details>`;
 }
 

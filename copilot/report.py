@@ -24,7 +24,7 @@ from urllib.parse import quote
 import requests
 import uvicorn
 
-from . import publish
+from . import publish, tweet
 from .agenda import BEIJING
 from .config import ROOT, load_env
 
@@ -46,17 +46,18 @@ def _edge(args: list[str], timeout: int) -> str:
     return r.stdout
 
 
-def screenshot(url: str, out: Path) -> None:
-    """先让页面渲染完、读出整页高度，再按这个高度截图；先写临时文件再改名，发群脚本不会读到半张图。"""
-    dom = _edge(['--virtual-time-budget=30000', f'--window-size={WIDTH},2000', '--dump-dom', url], timeout=180)
+def screenshot(url: str, out: Path, width: int = WIDTH, height: int | None = None, scale: float = SCALE) -> None:
+    """先确认页面渲染完（整页高度写在 data-report-h 上）再截图：不给 height 就截整页。
+    先写临时文件再改名，发群脚本不会读到半张图。"""
+    dom = _edge(['--virtual-time-budget=30000', f'--window-size={width},{height or 2000}', '--dump-dom', url], timeout=180)
     m = re.search(r'data-report-h="(\d+)"', dom)
     if not m:
         raise RuntimeError(f'页面没有渲染完：{url}')
     tmp = WORK / 'shot.png'      # Edge 的 --screenshot 不认中文路径，先写到英文路径
     tmp.unlink(missing_ok=True)
-    _edge(['--virtual-time-budget=30000', f'--window-size={WIDTH},{m.group(1)}', f'--force-device-scale-factor={SCALE}',
+    _edge(['--virtual-time-budget=30000', f'--window-size={width},{height or m.group(1)}', f'--force-device-scale-factor={scale}',
            f'--screenshot={tmp}', url], timeout=180)
-    if not tmp.exists() or tmp.stat().st_size < 50_000:
+    if not tmp.exists() or tmp.stat().st_size < 30_000:
         raise RuntimeError(f'截图失败：{url}')
     out.parent.mkdir(parents=True, exist_ok=True)
     part = out.with_name(out.name + '.part')   # 复制到目标旁边再改名：跨盘也行，改名这一步是原子的
@@ -106,9 +107,17 @@ def main():
                                out_dir / 'variants' / f'{name}-{day}-{target}.png')
                 except Exception as e:   # 专属版失败不影响群里那张；发群脚本会跳过这个人
                     log.warning('%s 的专属二维码版本生成失败：%s', target, e)
+        site = Path(env.get('SITE_DIR') or WORK / 'site')
+        try:     # 发 X 用的 4:5 卡片 + 推文文案，放在日报目录 site/x/日期/，跟网页一起提交；失败不影响发群
+            x_dir = site / 'x' / str(day)
+            screenshot(f'{base}/static/xcard.html', x_dir / 'card.png', width=1080, height=1350, scale=2)
+            text = tweet.to_text(tweet.compose(s.get(f'{base}/api/regime', timeout=60).json()))
+            (x_dir / 'tweet.txt').write_text(text, encoding='utf-8')
+            log.info('X 小图和推文文案已生成：%s', x_dir)
+        except Exception as e:
+            log.warning('X 小图生成失败：%s', e)
         if env.get('SITE_REPO'):
             try:     # 网页版发布失败不影响出图和发群
-                site = Path(env.get('SITE_DIR') or WORK / 'site')
                 publish.export(base, site, day)
                 log.info('网页版%s：%s', '已推送' if publish.push(site, env['SITE_REPO'], day) else '没有变化', env.get('SITE_URL', ''))
             except Exception as e:

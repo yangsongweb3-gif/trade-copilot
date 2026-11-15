@@ -32,6 +32,7 @@ from .market import Market
 from .news import News, NewsItem
 from .options import option_events, parse_deribit
 from .regime import LIGHT, evaluate_regime
+from .revenue import by_gecko, gecko_index, price_to_sales
 from .scanner import AltScore, rank_alts, universe
 
 CACHE_SECONDS = 600     # 日线级别的数据，10 分钟内重复打开页面不重新拉
@@ -54,6 +55,9 @@ _news_cache: dict = {'at': 0.0, 'data': None}
 _news_lock = threading.Lock()
 _alts_cache: dict = {'at': 0.0, 'data': None}
 _alts_lock = threading.Lock()
+_revenue_cache: dict = {'at': 0.0, 'data': None}
+_revenue_lock = threading.Lock()
+REVENUE_CACHE_SECONDS = 6 * 3600
 CANDIDATES = 10
 
 
@@ -158,10 +162,25 @@ def _alt(a: AltScore) -> dict:
             'no_chase': a.no_chase, 'volume_up': a.volume_up, 'strong': a.strong, 'vs_btc': a.vs_btc}
 
 
+def _revenue() -> dict | None:
+    """各币近 30 天手续费和收入（CoinGecko ID → 美元），DefiLlama 的目录很大，缓存 6 小时；拿不到返回 None。"""
+    with _revenue_lock:
+        if _revenue_cache['data'] is None or time.time() - _revenue_cache['at'] > REVENUE_CACHE_SECONDS:
+            try:
+                raw = _macro.llama_revenue()
+                index = gecko_index(raw['protocols'], raw['parents'], raw['chains'])
+                _revenue_cache['data'] = {'fees': by_gecko(raw['fees'], index), 'revenue': by_gecko(raw['revenue'], index)}
+                _revenue_cache['at'] = time.time()
+            except Exception as e:
+                log.warning('DefiLlama 收入数据获取失败：%s', e)
+        return _revenue_cache['data']
+
+
 def build_alts() -> dict:
     cfg = _plans.scanner
     tickers = _market.all_tickers()
-    syms = universe(_macro.market_cap_ranks(), tickers, cfg)
+    coins = _macro.market_coins()
+    syms = universe({s: c['rank'] for s, c in coins.items()}, tickers, cfg)
     btc = _market.daily('BTCUSDT', days=30)
     with ThreadPoolExecutor(8) as pool:   # 几十个币的日线并发拉，单个失败就跳过
         futures = {s: pool.submit(_market.daily, s, 30) for s in syms}
@@ -172,12 +191,22 @@ def build_alts() -> dict:
         except Exception as e:
             log.warning('%s 日线获取失败：%s', s, e)
     scored = rank_alts(btc, bars, tickers, syms, _plans.settings.no_chase_pct_24h)
+    rev = _revenue()
+
+    def alt(a: AltScore) -> dict:
+        """扫描结果加上市值和真实收入（DefiLlama 没有这个币的数据就是 None）。"""
+        c = coins.get(a.name, {})
+        r = rev['revenue'].get(c.get('id')) if rev else None
+        return {**_alt(a), 'mcap': c.get('mcap'), 'fees30d': rev['fees'].get(c.get('id')) if rev else None,
+                'rev30d': r, 'ps': price_to_sales(c.get('mcap'), r)}
+
     return {
         'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'hold': cfg.hold, 'rank_min': cfg.rank_min, 'rank_max': cfg.rank_max,
         'min_quote_volume': cfg.min_quote_volume, 'no_chase_pct': _plans.settings.no_chase_pct_24h,
-        'candidates': [_alt(a) for a in scored if a.strong][:CANDIDATES],
-        'all': [_alt(a) for a in scored],
+        'revenue_ok': rev is not None,
+        'candidates': [alt(a) for a in scored if a.strong][:CANDIDATES],
+        'all': [alt(a) for a in scored],
     }
 
 

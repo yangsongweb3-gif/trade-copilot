@@ -58,7 +58,7 @@ class Scanner(BaseModel):
     """强势山寨扫描：长期持仓不参与，只在市值排名区间里找比 BTC 强的币。"""
     hold: list[str] = ['BTC']     # 长期持有、不做短线的币；自己的写在 plans.yaml 的 scanner.hold
     rank_min: int = Field(default=5, ge=1)
-    rank_max: int = Field(default=50, le=250)
+    rank_max: int = Field(default=100, le=250)
     min_quote_volume: float = Field(default=10_000_000, ge=0)   # 24h 成交额（USDT）
 
     @field_validator('hold')

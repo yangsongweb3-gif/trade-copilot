@@ -9,3 +9,12 @@ config/plans.yaml
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# 2026-11-15 迁移前补充：密钥、虚拟环境、登录文件不提交
+.env.*
+!.env.example
+venv/
+node_modules/
+*.session
+*.session-journal
+.DS_Store

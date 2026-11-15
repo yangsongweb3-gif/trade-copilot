@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080">
+<title>BTC 每日面板 · X 卡片</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=ZCOOL+KuaiLe&display=swap" rel="stylesheet">
+<style>
+  /* 发 X 用的单张 4:5 竖版卡片（1080×1350）：X 单图按原比例完整显示。配色跟推特背景一样用夜空 + 漫画描边 */
+  :root {
+    --ink: #1a1a1a; --paper: #fffaf0; --paper-2: #fff1d6; --sand: #ffd95e; --pink: #ff9cb8; --cyan: #4fd1ff;
+    --up: #0a8f3c; --down: #c62828; --muted: #5c554d; --text: #1a1a1a;
+    --red: #d03b3b; --yellow: #fab219; --green: #0ca30c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1080px; height: 1350px; overflow: hidden; }
+  body {
+    color: var(--text);
+    font: 26px/1.4 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(rgb(255 255 255 / 7%) 1.6px, transparent 1.8px) 0 0 / 16px 16px,
+      radial-gradient(ellipse 60% 35% at 85% 8%, rgb(255 126 182 / 30%), transparent),
+      radial-gradient(ellipse 55% 30% at 10% 12%, rgb(79 209 255 / 25%), transparent),
+      linear-gradient(180deg, #081227 0%, #0f2c52 55%, #17487a 100%);
+  }
+  .fun { font-family: "ZCOOL KuaiLe", "Microsoft YaHei", sans-serif; font-weight: 400; }
+  .num { font-variant-numeric: tabular-nums; }
+  .card { position: relative; display: flex; flex-direction: column; gap: 20px; height: 1350px; padding: 42px 52px 32px; }
+  .panel { background: var(--paper); border: 4px solid var(--ink); border-radius: 26px; box-shadow: 7px 7px 0 #000; }
+
+  /* 顶部 */
+  .head { display: flex; align-items: center; gap: 18px; }
+  .logo { font-family: Bangers, Impact, sans-serif; font-size: 50px; letter-spacing: 2px; color: var(--sand);
+          -webkit-text-stroke: 2px var(--ink); text-shadow: 4px 4px 0 var(--ink); transform: rotate(-2deg); }
+  .title { font-size: 46px; color: #fff; }
+  .date { margin-left: auto; font-size: 30px; color: var(--ink); padding: 4px 22px; background: var(--sand);
+          border: 4px solid var(--ink); border-radius: 999px; box-shadow: 4px 4px 0 #000; transform: rotate(2deg); }
+
+  /* 价格 + 灯 */
+  .hero { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 22px 34px; }
+  .hero small { font-size: 26px; color: var(--muted); }
+  .price { font-size: 104px; font-weight: 800; line-height: 1; letter-spacing: -2px; }
+  .chg { font-size: 32px; font-weight: 700; margin-top: 8px; }
+  .chg.up { color: var(--up); } .chg.down { color: var(--down); }
+  .lightbox { display: flex; align-items: center; gap: 18px; padding: 16px 24px; border: 4px solid var(--ink); border-radius: 22px; background: var(--paper-2); }
+  .lamp { width: 74px; height: 74px; border-radius: 50%; border: 4px solid var(--ink); position: relative; }
+  .lamp::after { content: ""; position: absolute; top: 10px; left: 14px; width: 20px; height: 13px; border-radius: 50%; background: rgb(255 255 255 / 75%); transform: rotate(-25deg); }
+  .lamp.red { background: var(--red); box-shadow: 0 0 26px 6px rgb(208 59 59 / 55%); }
+  .lamp.yellow { background: var(--yellow); box-shadow: 0 0 26px 6px rgb(250 178 25 / 55%); }
+  .lamp.green { background: var(--green); box-shadow: 0 0 26px 6px rgb(12 163 12 / 50%); }
+  .lname { font-size: 50px; line-height: 1; }
+  .lscore { font-size: 24px; color: var(--muted); margin-top: 6px; }
+  .reason { grid-column: 1 / -1; margin-top: 10px; font-size: 27px; color: var(--muted); }
+
+  /* 价位 */
+  .levels { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 16px 0; }
+  .lv { padding: 0 32px; }
+  .lv + .lv { border-left: 3px dashed #d9d2c3; }
+  .lv h3 { margin: 0 0 8px; font-size: 32px; }
+  .lv.res h3 { color: var(--down); } .lv.sup h3 { color: var(--up); }
+  .lv li { display: flex; align-items: baseline; gap: 12px; padding: 2px 0; }
+  .lv ul { list-style: none; margin: 0; padding: 0; }
+  .lv b { font-size: 38px; }
+  .lv span { font-size: 22px; color: var(--muted); }
+
+  /* 指标 */
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .m { padding: 12px 24px; }
+  .m small { display: block; font-size: 24px; color: var(--muted); }
+  .m b { font-size: 44px; line-height: 1.15; }
+  .m em { font-style: normal; font-size: 22px; color: var(--muted); margin-left: 8px; }
+  .m b.up { color: var(--up); } .m b.down { color: var(--down); }
+
+  /* 今日变化 + 日程 */
+  .info { display: grid; grid-template-columns: 1fr 1fr; padding: 16px 0; }
+  .info > div { padding: 0 26px; min-width: 0; }
+  .info > div + div { border-left: 3px dashed #d9d2c3; }
+  .info h3 { margin: 0 0 6px; font-size: 30px; }
+  .info ul { list-style: none; margin: 0; padding: 0; }
+  .info li { font-size: 24px; padding: 3px 0; }
+  .arw { display: inline-block; width: 30px; font-size: 22px; }
+  .arw.up { color: var(--up); } .arw.down { color: var(--down); } .arw.flat { color: var(--muted); }
+  .when { display: inline-block; min-width: 132px; color: var(--muted); }
+
+  .foot { margin-top: auto; display: flex; align-items: center; gap: 16px; color: #fff; font-size: 22px; }
+  .foot .qq { font-size: 30px; color: var(--sand); }
+  .foot span:last-child { margin-left: auto; padding: 4px 16px; border-radius: 999px; background: rgb(10 30 50 / 60%); }
+</style>
+</head>
+<body>
+<div class="card" id="card"><div class="panel" style="padding:40px;font-size:30px">加载中…</div></div>
+<script src="/static/common.js"></script>
+<script>
+const NAME = { red: '红灯', yellow: '黄灯', green: '绿灯' };
+const sign = (v, n) => `${v > 0 ? '+' : ''}${v.toFixed(n)}`;
+const yi = (m) => (Math.abs(m) >= 100 ? `${sign(m / 100, 1)} 亿美元` : `${sign(m * 100, 0)} 万美元`);
+const last = (s) => s?.values?.at(-1);
+// 北京时间：今天 / 明天 / 周几 + 时分
+const BJ = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const bjParts = (t) => Object.fromEntries(BJ.formatToParts(t).map((x) => [x.type, x.value]));
+function when(iso) {
+  const p = bjParts(new Date(iso)), today = bjParts(new Date());
+  const days = Math.round((Date.UTC(p.year, p.month - 1, p.day) - Date.UTC(today.year, today.month - 1, today.day)) / 864e5);
+  return `${{ 0: '今天', 1: '明天' }[days] || p.weekday} ${p.hour}:${p.minute}`;
+}
+
+function render(d) {
+  const lv = d.levels, m = d.macro || {};
+  const day = new Date(`${d.updated_at.slice(0, 10)}T00:00:00+08:00`);
+  const date = `${day.getMonth() + 1}/${day.getDate()} 周${'日一二三四五六'[day.getDay()]}`;
+  const prev = d.btc.closes.at(-1), price = lv ? lv.price : prev, chg = (price / prev - 1) * 100;
+  const level = (x) => `<li><b class="num">${fmt(x.price)}</b><span>${esc(x.label)}</span></li>`;
+  const etf5 = m.etf ? m.etf.values.slice(-5).reduce((a, b) => a + b, 0) : null;
+  const prem = m.premium ? m.premium.values.slice(-24).reduce((a, b) => a + b, 0) / Math.min(24, m.premium.values.length) : null;
+  const fng = last(m.fng), fngName = d.indicators.find((i) => i.name === '恐惧贪婪')?.text.split('：').pop();
+  const funding = last(m.funding);
+  const metric = (label, value, cls, sub) => `<div class="panel m"><small>${label}</small><b class="num ${cls}">${value}</b>${sub ? `<em>${sub}</em>` : ''}</div>`;
+  const arrow = { up: '▲', down: '▼', flat: '●' };
+  const changes = (d.changes || []).slice(0, 3).map((c) => `<li><span class="arw ${c.tone}">${arrow[c.tone]}</span>${esc(c.text)}</li>`).join('')
+    || '<li><span class="arw flat">●</span>和昨天相比没有明显变化</li>';
+  const events = (d.agenda || []).filter((e) => new Date(e.time) > new Date()).slice(0, 3)
+    .map((e) => `<li><span class="when num">${when(e.time)}</span>${esc(e.title)}</li>`).join('') || '<li>未来几天没有美国的重要数据</li>';
+
+  $('#card').innerHTML = `
+    <div class="head"><span class="logo">TRADE-COPILOT</span><span class="title fun">BTC 每日面板</span><span class="date fun">${date}</span></div>
+    <section class="panel hero">
+      <div><small>BTC 现价（北京时间 ${d.asof?.levels?.replace('实时 ', '') || ''}）</small>
+        <div class="price num">${fmt(price)}</div>
+        <div class="chg num ${chg >= 0 ? 'up' : 'down'}">较昨收 ${sign(chg, 2)}%</div></div>
+      <div class="lightbox"><div class="lamp ${d.light}"></div><div><div class="lname fun">${NAME[d.light]}</div><div class="lscore">环境灯 · 综合 ${sign(d.score, 0)} 分</div></div></div>
+      <div class="reason">${esc(d.reason)}</div>
+    </section>
+    ${lv ? `<section class="panel levels">
+      <div class="lv res"><h3 class="fun">压力</h3><ul>${lv.resistance.slice(0, 3).map(level).join('')}</ul></div>
+      <div class="lv sup"><h3 class="fun">支撑</h3><ul>${lv.support.slice(0, 3).map(level).join('')}</ul></div>
+    </section>` : ''}
+    <section class="metrics">
+      ${etf5 == null ? '' : metric('BTC 现货 ETF · 近 5 日', yi(etf5), etf5 >= 0 ? 'up' : 'down', '')}
+      ${funding == null ? '' : metric('资金费率（最新一期）', `${(funding * 100).toFixed(4)}%`, '', '')}
+      ${fng == null ? '' : metric('恐惧贪婪指数', `${fng}`, '', esc(fngName || ''))}
+      ${prem == null ? '' : metric('Coinbase 溢价 · 24h 平均', `${sign(prem, 2)}%`, prem >= 0 ? 'up' : 'down', '')}
+    </section>
+    <section class="panel info"><div><h3 class="fun">今日变化</h3><ul>${changes}</ul></div><div><h3 class="fun">接下来</h3><ul>${events}</ul></div></section>
+    <div class="foot"><span class="qq fun">听星观宇</span><span>yangsongweb3-gif.github.io/trade-copilot</span><span>只整理数据 · 不构成投资建议</span></div>`;
+}
+
+fetch('/api/regime').then((r) => r.json()).then((d) => {
+  render(d);
+  // 截图脚本等这个标记；顺便把实际内容高度记下来，超出 1350 能看出来
+  document.fonts.ready.then(() => { document.documentElement.dataset.reportH = document.getElementById('card').scrollHeight; });
+});
+</script>
+</body>
+</html>

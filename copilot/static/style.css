@@ -250,6 +250,9 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .alt-head .chip { margin-left: auto; }
 .alt-price { margin: 6px 0 8px; font-size: 15px; color: var(--text-2); }
 .alt-price small { color: var(--text-3); font-size: 12px; }
+.alt-rev { margin: -2px 0 8px; font-size: 13px; color: var(--text-2); }
+.alt-rev b { color: var(--text); }
+.alt-rev.muted { color: var(--text-3); }
 .alt-rs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .alt-rs div { padding: 4px 8px; background: var(--good-tint); border: 2px solid var(--line); border-radius: 10px; }
 .alt-rs small { display: block; font-size: 11px; color: var(--text-3); }
